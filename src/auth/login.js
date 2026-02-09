@@ -1,18 +1,25 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { body, validationResult } = require('express-validator');
 
 // Factory function : accepte le pool en parametre pour l'injection de dependance
 function createLoginRouter(pool) {
   const router = express.Router();
 
-  router.post('/login', async (req, res) => {
+  router.post('/login', [
+    // SECURE : Validation stricte des inputs avec express-validator
+    body('username').isString().trim().isLength({ min: 1, max: 255 }).withMessage('Valid username is required'),
+    body('password').isString().isLength({ min: 1, max: 255 }).withMessage('Valid password is required')
+  ], async (req, res) => {
     try {
-      const { username, password } = req.body;
-
-      // SECURE : Validation des inputs
-      if (!username || !password) {
+      // SECURE : Verifier les erreurs de validation
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
         return res.status(400).json({ error: 'Username and password are required' });
       }
+
+      const { username, password } = req.body;
 
       // SECURE : Requete parametree au lieu de string interpolation
       // Avant (VULNERABLE) : `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`
@@ -33,8 +40,17 @@ function createLoginRouter(pool) {
 
       // SECURE : Ne pas retourner le mot de passe dans la reponse
       const { password: _, ...safeUser } = user;
+
+      // SECURE : Generer un JWT signe avec expiration
+      const token = jwt.sign(
+        { id: user.id, username: user.username, role: user.role },
+        process.env.JWT_SECRET,
+        { expiresIn: '1h' }
+      );
+
       res.json({
         success: true,
+        token,
         user: safeUser
       });
     } catch (err) {

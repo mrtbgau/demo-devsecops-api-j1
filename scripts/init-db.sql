@@ -11,11 +11,12 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insérer des utilisateurs de test
+-- SECURE : Mots de passe hashes avec bcrypt (salt 10) au lieu de plaintext
+-- admin => Admin123!Secure | user => User123!Secure | alice => Alice123!Secure
 INSERT INTO users (username, password, email, role) VALUES
-    ('admin', 'admin123', 'admin@example.com', 'admin'),
-    ('user', 'password', 'user@example.com', 'user'),
-    ('alice', 'alice2024', 'alice@example.com', 'user')
+    ('admin', '$2b$10$04guibzjzvHjgxEMUvsOzeVuY6IDSh97Aig1.qZbUtng/BVE45oue', 'admin@example.com', 'admin'),
+    ('user', '$2b$10$kyBzhZd1YLQqfY9S9pdNzuY1xcFsRrBOVoaQuQS8a1JEMqv1DDTrK', 'user@example.com', 'user'),
+    ('alice', '$2b$10$/5wNWNikxdgaQ/nFBv.ppeb9YnmHM2JDG0n2V4fW7EHy5QaJW//Qy', 'alice@example.com', 'user')
 ON CONFLICT (username) DO NOTHING;
 
 -- Afficher les utilisateurs créés

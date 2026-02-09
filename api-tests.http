@@ -1,28 +1,44 @@
 ### API DevSecOps - Tests
 ### Installation extension VSCode : REST Client (humao.rest-client)
-### Utilisation : Cliquer sur "Send Request" au-dessus de chaque requête
+### Utilisation : Cliquer sur "Send Request" au-dessus de chaque requete
+### IMPORTANT : Executer d'abord les requetes de login (section 2) pour capturer les tokens
 
 @baseUrl = http://localhost:3000
 
 ###############################################################################
-# 1. Health Check
+# 1. Health Check (route publique)
 ###############################################################################
 
 ### GET Health Check
 GET {{baseUrl}}/api/health
 
 ###############################################################################
-# 2. Login (SQL Injection)
+# 2. Login - Authentification (executer en premier pour capturer les tokens)
 ###############################################################################
 
-### POST Login - Normal (va échouer si pas d'utilisateur)
+### POST Login Admin - Credentials corrects
+# @name loginAdmin
 POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
 {
   "username": "admin",
-  "password": "admin123"
+  "password": "Admin123!Secure"
 }
+
+### POST Login User - Credentials corrects
+# @name loginUser
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "user",
+  "password": "User123!Secure"
+}
+
+###############################################################################
+# 3. Login - Tests de securite (SQL Injection)
+###############################################################################
 
 ### POST Login - SQL Injection (bypass mot de passe)
 POST {{baseUrl}}/api/auth/login
@@ -42,58 +58,92 @@ Content-Type: application/json
   "password": "test"
 }
 
-### POST Login - Utilisateur normal
-POST {{baseUrl}}/api/auth/login
-Content-Type: application/json
-
-{
-  "username": "user",
-  "password": "password"
-}
-
 ###############################################################################
-# 3. Files (Path Traversal)
+# 4. Files - Acces authentifie (token requis)
 ###############################################################################
 
-### GET File - Légitime (toto.txt)
-GET {{baseUrl}}/api/files?name=toto.txt
+### GET File - Legitime avec authentification admin
+GET {{baseUrl}}/api/files?name=photo.jpg
+Authorization: Bearer {{loginAdmin.response.body.token}}
 
-### GET File - Légitime (document.pdf)
+### GET File - Legitime avec authentification user
 GET {{baseUrl}}/api/files?name=document.pdf
+Authorization: Bearer {{loginUser.response.body.token}}
+
+### GET File - SANS authentification (doit retourner 401)
+GET {{baseUrl}}/api/files?name=photo.jpg
+
+###############################################################################
+# 5. Files - Tests de securite (Path Traversal) avec authentification
+###############################################################################
 
 ### GET File - Path Traversal (package.json)
 GET {{baseUrl}}/api/files?name=../package.json
+Authorization: Bearer {{loginAdmin.response.body.token}}
 
 ### GET File - Path Traversal (.env.example)
 GET {{baseUrl}}/api/files?name=../.env.example
+Authorization: Bearer {{loginAdmin.response.body.token}}
 
 ### GET File - Path Traversal (database.js)
 GET {{baseUrl}}/api/files?name=../src/config/database.js
+Authorization: Bearer {{loginAdmin.response.body.token}}
 
 ### GET File - Path Traversal (secrets examples)
 GET {{baseUrl}}/api/files?name=../SECRETS_EXAMPLES.md
+Authorization: Bearer {{loginAdmin.response.body.token}}
 
 ###############################################################################
-# 4. Users (CHALLENGE - 7 vulnérabilités)
+# 6. Users - Profil et listing (routes protegees)
 ###############################################################################
 
-### POST Create User - Normal
+### GET Mon profil (admin connecte)
+GET {{baseUrl}}/api/users/me
+Authorization: Bearer {{loginAdmin.response.body.token}}
+
+### GET Mon profil (user connecte)
+GET {{baseUrl}}/api/users/me
+Authorization: Bearer {{loginUser.response.body.token}}
+
+### GET Mon profil - SANS authentification (doit retourner 401)
+GET {{baseUrl}}/api/users/me
+
+### GET Liste des utilisateurs (admin uniquement - doit retourner 200)
+GET {{baseUrl}}/api/users
+Authorization: Bearer {{loginAdmin.response.body.token}}
+
+### GET Liste des utilisateurs - role user (doit retourner 403)
+GET {{baseUrl}}/api/users
+Authorization: Bearer {{loginUser.response.body.token}}
+
+### GET Liste des utilisateurs - SANS authentification (doit retourner 401)
+GET {{baseUrl}}/api/users
+
+###############################################################################
+# 7. Users - Inscription (route publique, pas de token requis)
+###############################################################################
+
+### POST Create User - Normal (mot de passe fort requis)
 POST {{baseUrl}}/api/users
 Content-Type: application/json
 
 {
   "email": "test@example.com",
-  "password": "testpassword",
+  "password": "TestPass123!Secure",
   "role": "user"
 }
 
-### POST Create User - Privilege Escalation (se donner le rôle admin)
+###############################################################################
+# 8. Users - Tests de securite
+###############################################################################
+
+### POST Create User - Privilege Escalation (se donner le role admin)
 POST {{baseUrl}}/api/users
 Content-Type: application/json
 
 {
   "email": "hacker@evil.com",
-  "password": "test",
+  "password": "HackerPass123!Secure",
   "role": "admin"
 }
 
@@ -118,7 +168,7 @@ Content-Type: application/json
 }
 
 ###############################################################################
-# 5. Documentation
+# 9. Documentation (route publique)
 ###############################################################################
 
 ### GET Documentation (liste des endpoints)

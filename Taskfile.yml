@@ -782,6 +782,19 @@ tasks:
       - rm -rf coverage {{.REPORTS_DIR}} node_modules/.cache
       - echo "Artefacts nettoyés"
 
+  obs-start:
+    desc: "Démarrage de Prometheus et Grafana pour l'observabilité"
+    cmds:
+      - docker compose -f docker-compose-obs.yml up -d
+      - echo "Prometheus disponible sur http://localhost:9090"
+      - echo "Grafana disponible sur http://localhost:3001 (admin/admin)"
+
+  obs-stop:
+    desc: "Arrêt de Prometheus et Grafana"
+    cmds:
+      - docker compose -f docker-compose-obs.yml down
+      - echo "Stack d'observabilité arrêtée"
+
   check-tools:
     desc: "Vérifier quels outils DevSecOps sont installés"
     cmds:

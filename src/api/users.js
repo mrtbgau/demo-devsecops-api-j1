@@ -1,10 +1,42 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
+const authenticate = require('../middlewares/authenticate');
+const authorize = require('../middlewares/authorize');
 
 // Factory function : accepte le pool en parametre pour l'injection de dependance
 function createUsersRouter(pool) {
   const router = express.Router();
+
+  // SECURE : Route protegee - profil de l'utilisateur connecte
+  router.get('/users/me', authenticate, async (req, res) => {
+    try {
+      // SECURE : Requete parametree, ne retourne jamais le mot de passe
+      const query = 'SELECT id, username, email, role, created_at FROM users WHERE id = $1';
+      const result = await pool.query(query, [req.user.id]);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      res.json({ user: result.rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // SECURE : Route protegee admin uniquement - listing des utilisateurs
+  router.get('/users', authenticate, authorize('admin'), async (req, res) => {
+    try {
+      // SECURE : Ne jamais retourner les mots de passe
+      const query = 'SELECT id, username, email, role, created_at FROM users';
+      const result = await pool.query(query);
+
+      res.json({ users: result.rows });
+    } catch (err) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
 
   router.post('/users', [
     // SECURE : Validation des inputs avec express-validator

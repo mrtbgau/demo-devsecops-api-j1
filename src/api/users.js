@@ -8,8 +8,15 @@ function createUsersRouter(pool) {
 
   router.post('/users', [
     // SECURE : Validation des inputs avec express-validator
-    body('email').isEmail().withMessage('Valid email is required'),
-    body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+    body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+    // SECURE : Politique de mot de passe forte (majuscule, minuscule, chiffre, caractere special, min 12 chars)
+    body('password').isStrongPassword({
+      minLength: 12,
+      minLowercase: 1,
+      minUppercase: 1,
+      minNumbers: 1,
+      minSymbols: 1
+    }).withMessage('Password must be at least 12 characters with uppercase, lowercase, number and special character')
   ], async (req, res) => {
     try {
       // SECURE : Verifier les erreurs de validation

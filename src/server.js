@@ -4,6 +4,8 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
+const authenticate = require('./middlewares/authenticate');
+const authorize = require('./middlewares/authorize');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -68,13 +70,25 @@ app.get('/', (req, res) => {
       {
         method: 'GET',
         path: '/api/files?name=photo.jpg',
-        description: 'Telechargement de fichiers',
+        description: 'Telechargement de fichiers (authentification requise)',
         example: '/api/files?name=photo.jpg'
+      },
+      {
+        method: 'GET',
+        path: '/api/users/me',
+        description: 'Profil de l\'utilisateur connecte (authentification requise)',
+        example: 'Authorization: Bearer <token>'
+      },
+      {
+        method: 'GET',
+        path: '/api/users',
+        description: 'Liste des utilisateurs (admin uniquement)',
+        example: 'Authorization: Bearer <token>'
       },
       {
         method: 'POST',
         path: '/api/users',
-        description: 'Creation d\'utilisateur',
+        description: 'Creation d\'utilisateur (inscription publique)',
         example: {
           email: 'user@example.com',
           password: 'mypassword',
@@ -99,7 +113,8 @@ app.get('/api/health', (req, res) => {
 // Monter les routes
 // SECURE : Rate limiting strict applique sur les routes d'authentification
 app.use('/api/auth', loginLimiter, loginRouter);
-app.use('/api', filesRouter);
+// SECURE : Le middleware authenticate protege les routes de telechargement de fichiers
+app.use('/api', authenticate, filesRouter);
 app.use('/api', usersRouter);
 
 // 404 handler

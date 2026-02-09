@@ -609,3 +609,193 @@ tasks:
 
         echo "Rapport généré: $REPORT"
         cat $REPORT
+
+# =============================================================================
+# TÂCHES UTILITAIRES
+# =============================================================================
+
+  setup:
+    desc: "Installation de tous les outils DevSecOps nécessaires"
+    cmds:
+      - echo "=== Installation des outils DevSecOps ==="
+      - echo ""
+
+      # Node.js devDependencies
+      - echo "--- npm install ---"
+      - npm install
+
+      # gitleaks
+      - |
+        echo ""
+        echo "--- gitleaks ---"
+        if command -v gitleaks &> /dev/null; then
+          echo "gitleaks déjà installé ($(gitleaks version))"
+        else
+          echo "Installation de gitleaks..."
+          if command -v brew &> /dev/null; then
+            brew install gitleaks
+          elif command -v scoop &> /dev/null; then
+            scoop install gitleaks
+          else
+            echo "Installez gitleaks manuellement: https://github.com/gitleaks/gitleaks/releases"
+          fi
+        fi
+
+      # Semgrep
+      - |
+        echo ""
+        echo "--- Semgrep ---"
+        if command -v semgrep &> /dev/null; then
+          echo "Semgrep déjà installé ($(semgrep --version))"
+        else
+          echo "Installation de Semgrep..."
+          pip install semgrep 2>/dev/null || pip3 install semgrep 2>/dev/null || echo "Installez Python puis: pip install semgrep"
+        fi
+
+      # Trivy
+      - |
+        echo ""
+        echo "--- Trivy ---"
+        if command -v trivy &> /dev/null; then
+          echo "Trivy déjà installé ($(trivy --version | head -1))"
+        else
+          echo "Installation de Trivy..."
+          if command -v brew &> /dev/null; then
+            brew install trivy
+          elif command -v scoop &> /dev/null; then
+            scoop install trivy
+          else
+            echo "Installez Trivy manuellement: https://aquasecurity.github.io/trivy/latest/getting-started/installation/"
+          fi
+        fi
+
+      # Syft
+      - |
+        echo ""
+        echo "--- Syft ---"
+        if command -v syft &> /dev/null; then
+          echo "Syft déjà installé ($(syft version | head -1))"
+        else
+          echo "Installation de Syft..."
+          if command -v brew &> /dev/null; then
+            brew install syft
+          elif command -v scoop &> /dev/null; then
+            scoop install syft
+          else
+            echo "Installez Syft manuellement: https://github.com/anchore/syft/releases"
+          fi
+        fi
+
+      # k6
+      - |
+        echo ""
+        echo "--- k6 ---"
+        if command -v k6 &> /dev/null; then
+          echo "k6 déjà installé ($(k6 version))"
+        else
+          echo "Installation de k6..."
+          if command -v brew &> /dev/null; then
+            brew install k6
+          elif command -v scoop &> /dev/null; then
+            scoop install k6
+          else
+            echo "Installez k6 manuellement: https://k6.io/docs/getting-started/installation/"
+          fi
+        fi
+
+      # Snyk
+      - |
+        echo ""
+        echo "--- Snyk ---"
+        if command -v snyk &> /dev/null; then
+          echo "Snyk déjà installé ($(snyk --version))"
+        else
+          echo "Installation de Snyk..."
+          npm install -g snyk || echo "Installez Snyk manuellement: npm i -g snyk && snyk auth"
+        fi
+
+      # sonar-scanner
+      - |
+        echo ""
+        echo "--- sonar-scanner ---"
+        if command -v sonar-scanner &> /dev/null; then
+          echo "sonar-scanner déjà installé"
+        else
+          echo "Installation de sonar-scanner..."
+          npm install -g sonar-scanner || echo "Installez manuellement: npm i -g sonar-scanner"
+        fi
+
+      - echo ""
+      - echo "=== Installation terminée ==="
+      - echo "Lancez 'task setup-hooks' pour configurer les git hooks"
+
+  setup-hooks:
+    desc: "Installation des git hooks pour le pre-commit"
+    cmds:
+      - |
+        echo "=== Configuration du hook pre-commit ==="
+        mkdir -p .git/hooks
+        cat > .git/hooks/pre-commit << 'HOOK'
+        #!/bin/sh
+        echo "=== DevSecOps Pre-commit Hook ==="
+        task pre-commit
+        HOOK
+        chmod +x .git/hooks/pre-commit
+        echo "Hook pre-commit installé avec succès"
+        echo "Chaque commit exécutera automatiquement: task pre-commit"
+
+  docker-up:
+    desc: "Démarrage de PostgreSQL (docker-compose)"
+    cmds:
+      - docker compose up -d
+      - echo "PostgreSQL démarré. Attente du healthcheck..."
+      - sleep 5
+      - docker compose ps
+
+  docker-down:
+    desc: "Arrêt des services Docker"
+    cmds:
+      - docker compose down -v
+      - echo "Services Docker arrêtés"
+
+  sonar-start:
+    desc: "Démarrage de SonarQube"
+    cmds:
+      - docker compose -f docker-compose-sq.yml up -d
+      - echo "SonarQube en cours de démarrage sur {{.SONAR_URL}}"
+      - 'echo "Premiere connexion: admin/admin"'
+
+  sonar-stop:
+    desc: "Arrêt de SonarQube"
+    cmds:
+      - docker compose -f docker-compose-sq.yml down
+      - echo "SonarQube arrêté"
+
+  dev:
+    desc: "Démarrage du serveur en mode développement"
+    cmds:
+      - npm run dev
+
+  clean:
+    desc: "Nettoyage des artefacts (coverage, reports)"
+    cmds:
+      - rm -rf coverage {{.REPORTS_DIR}} node_modules/.cache
+      - echo "Artefacts nettoyés"
+
+  check-tools:
+    desc: "Vérifier quels outils DevSecOps sont installés"
+    cmds:
+      - |
+        echo "=== Vérification des outils DevSecOps ==="
+        echo ""
+        TOOLS="node npm docker gitleaks semgrep trivy syft k6 snyk sonar-scanner"
+        for tool in $TOOLS; do
+          if command -v $tool &> /dev/null; then
+            VERSION=$($tool --version 2>/dev/null | head -1 || $tool version 2>/dev/null | head -1 || echo "installé")
+            echo "✓ $tool - $VERSION"
+          else
+            echo "✗ $tool - NON INSTALLÉ"
+          fi
+        done
+        echo ""
+        echo "Lancez 'task setup' pour installer les outils manquants"

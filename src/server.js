@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const fs = require('fs');
 const path = require('path');
 
@@ -7,29 +8,36 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors());
+// SECURE : helmet ajoute des headers de securite (X-Content-Type-Options, X-Frame-Options, etc.)
+app.use(helmet());
+// SECURE : CORS restreint a une origine specifique au lieu de tout autoriser
+app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Créer le dossier uploads s'il n'existe pas
+// Creer le dossier uploads s'il n'existe pas
 const uploadsDir = path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
-  // Créer quelques fichiers de test
   fs.writeFileSync(path.join(uploadsDir, 'photo.jpg'), 'fake image content');
   fs.writeFileSync(path.join(uploadsDir, 'document.pdf'), 'fake pdf content');
 }
 
-// Routes
-const loginRouter = require('./auth/login');
-const filesRouter = require('./api/files');
-const usersRouter = require('./api/users');
+// Routes - Factory functions avec injection de dependance
+const pool = require('./config/database');
+const createLoginRouter = require('./auth/login');
+const createFilesRouter = require('./api/files');
+const createUsersRouter = require('./api/users');
+
+const loginRouter = createLoginRouter(pool);
+const filesRouter = createFilesRouter(uploadsDir);
+const usersRouter = createUsersRouter(pool);
 
 // Page d'accueil
 app.get('/', (req, res) => {
   res.json({
     message: 'API DevSecOps - Exercice Jour 1',
-    warning: '🚨 Cette API contient des vulnérabilités à des fins pédagogiques',
+    warning: 'Cette API a ete securisee dans le cadre du cours DevSecOps',
     endpoints: [
       {
         method: 'POST',
@@ -43,13 +51,13 @@ app.get('/', (req, res) => {
       {
         method: 'GET',
         path: '/api/files?name=photo.jpg',
-        description: 'Téléchargement de fichiers',
+        description: 'Telechargement de fichiers',
         example: '/api/files?name=photo.jpg'
       },
       {
         method: 'POST',
         path: '/api/users',
-        description: 'Création d\'utilisateur (CHALLENGE)',
+        description: 'Creation d\'utilisateur',
         example: {
           email: 'user@example.com',
           password: 'mypassword',
@@ -62,12 +70,6 @@ app.get('/', (req, res) => {
         description: 'Health check',
         example: '/api/health'
       }
-    ],
-    exercises: [
-      '1. Analyser le code de /api/auth/login et trouver les vulnérabilités',
-      '2. Analyser le code de /api/files et trouver les vulnérabilités',
-      '3. Analyser le code de /api/users et trouver TOUTES les vulnérabilités (CHALLENGE)',
-      '4. Configurer git-secrets pour bloquer les commits de secrets'
     ]
   });
 });
@@ -90,33 +92,17 @@ app.use((req, res) => {
 // Error handler global
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  // 🚨 Attention : en production, ne jamais exposer le stack trace !
+  // SECURE : Ne jamais exposer le stack trace en production
   res.status(500).json({
-    error: err.message,
-    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    error: 'Internal server error'
   });
 });
 
-// Démarrage du serveur
-app.listen(PORT, () => {
-  console.log(`
-╔════════════════════════════════════════════════════════════════╗
-║                                                                ║
-║   🚨 API DevSecOps - Exercice Jour 1                          ║
-║                                                                ║
-║   Serveur démarré sur : http://localhost:${PORT}                 ║
-║                                                                ║
-║   ⚠️  ATTENTION : Cette API contient des vulnérabilités       ║
-║       à des fins pédagogiques. NE PAS utiliser en production! ║
-║                                                                ║
-║   📚 Endpoints disponibles :                                  ║
-║      GET  /                    - Documentation               ║
-║      POST /api/auth/login       - Login (SQL Injection)      ║
-║      GET  /api/files?name=...   - Files (Path Traversal)     ║
-║      POST /api/users            - Users (Challenge)          ║
-║                                                                ║
-╚════════════════════════════════════════════════════════════════╝
-  `);
-});
+// SECURE : Guard pour eviter de demarrer le serveur lors des tests
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server started on http://localhost:${PORT}`);
+  });
+}
 
 module.exports = app;

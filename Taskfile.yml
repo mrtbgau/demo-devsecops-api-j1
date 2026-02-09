@@ -339,3 +339,91 @@ tasks:
         }
         SCRIPT
         fi
+
+# =============================================================================
+# PHASE 5 : PRODUCTION
+# Déploiement sécurisé en production
+# =============================================================================
+
+  production:
+    desc: "[Phase 5] Déploiement sécurisé en production"
+    cmds:
+      - task: docker-build-prod
+      - task: docker-push-prod
+      - task: deploy-prod
+      - task: smoke-test-prod
+      - task: tag-release
+
+  docker-build-prod:
+    desc: "Build de l'image Docker pour production"
+    cmds:
+      - |
+        VERSION={{.IMAGE_TAG}}
+        if [ "$VERSION" = "latest" ]; then
+          VERSION=$(git describe --tags --always 2>/dev/null || echo "0.0.0")
+        fi
+        echo "Build de l'image de production: {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:${VERSION}"
+        docker build \
+          -t {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:${VERSION} \
+          -t {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:latest \
+          -f {{.DOCKERFILE}} \
+          --build-arg NODE_ENV=production \
+          .
+
+  docker-push-prod:
+    desc: "Push de l'image vers le registry (production)"
+    cmds:
+      - |
+        VERSION={{.IMAGE_TAG}}
+        if [ "$VERSION" = "latest" ]; then
+          VERSION=$(git describe --tags --always 2>/dev/null || echo "0.0.0")
+        fi
+        docker push {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:${VERSION}
+        docker push {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:latest
+
+  deploy-prod:
+    desc: "Déploiement en production"
+    cmds:
+      - |
+        echo "=== Déploiement en production ==="
+        if [ -f {{.PROD_COMPOSE}} ]; then
+          docker compose -f {{.PROD_COMPOSE}} pull
+          docker compose -f {{.PROD_COMPOSE}} up -d --force-recreate
+          echo "Attente du démarrage des services..."
+          sleep 15
+        else
+          echo "ATTENTION: {{.PROD_COMPOSE}} non trouvé."
+          echo "Déploiement manuel requis ou créez le fichier docker-compose.prod.yml"
+          exit 1
+        fi
+
+  smoke-test-prod:
+    desc: "Health check post-déploiement en production"
+    cmds:
+      - |
+        echo "=== Smoke Tests Production - {{.PROD_URL}} ==="
+        RETRIES=5
+        DELAY=5
+        for i in $(seq 1 $RETRIES); do
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" {{.PROD_URL}}/api/health 2>/dev/null)
+          if [ "$STATUS" = "200" ]; then
+            echo "Health check OK (tentative $i)"
+            exit 0
+          fi
+          echo "Tentative $i/$RETRIES échouée (status: $STATUS). Nouvelle tentative dans ${DELAY}s..."
+          sleep $DELAY
+        done
+        echo "ÉCHEC: Le service n'est pas disponible après $RETRIES tentatives"
+        exit 1
+
+  tag-release:
+    desc: "Tagging de la release Git"
+    cmds:
+      - |
+        VERSION={{.IMAGE_TAG}}
+        if [ "$VERSION" = "latest" ]; then
+          VERSION=$(date +%Y%m%d-%H%M%S)
+        fi
+        echo "Création du tag: v${VERSION}"
+        git tag -a "v${VERSION}" -m "Release v${VERSION} - $(date -Iseconds)"
+        echo "Tag créé. Pour pousser: git push origin v${VERSION}"

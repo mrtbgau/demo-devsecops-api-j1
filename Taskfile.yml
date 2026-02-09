@@ -134,3 +134,80 @@ tasks:
     desc: "Détection des dépendances obsolètes"
     cmds:
       - npm outdated || true
+
+# =============================================================================
+# PHASE 3 : PULL REQUEST
+# Validation complète avant merge (~5-15min)
+# =============================================================================
+
+  pull-request:
+    desc: "[Phase 3] Validation complète pour Pull Request (CI/CD)"
+    cmds:
+      - task: branch-feature
+      - task: integration-test
+      - task: coverage
+      - task: sonarqube-scan
+      - task: docker-build
+      - task: trivy-image
+      - task: snyk-test
+
+  integration-test:
+    desc: "Tests d'intégration API (Jest + Supertest)"
+    cmds:
+      - npx jest --testPathPattern="integration|e2e" --forceExit --detectOpenHandles {{if eq .CI "true"}}--ci{{end}}
+    env:
+      NODE_ENV: test
+
+  coverage:
+    desc: "Couverture de code avec seuil minimum ({{.COVERAGE_THRESHOLD}}%)"
+    cmds:
+      - npx jest --coverage --coverageReporters=text --coverageReporters=lcov --coverageReporters=json-summary --coverageDirectory=coverage --forceExit --detectOpenHandles {{if eq .CI "true"}}--ci{{end}}
+      - |
+        echo "=== Vérification du seuil de couverture ({{.COVERAGE_THRESHOLD}}%) ==="
+        if [ -f coverage/coverage-summary.json ]; then
+          ACTUAL=$(node -e "const c=require('./coverage/coverage-summary.json');console.log(Math.round(c.total.lines.pct))")
+          echo "Couverture actuelle: ${ACTUAL}%"
+          if [ "$ACTUAL" -lt "{{.COVERAGE_THRESHOLD}}" ]; then
+            echo "ÉCHEC: Couverture (${ACTUAL}%) inférieure au seuil ({{.COVERAGE_THRESHOLD}}%)"
+            exit 1
+          fi
+          echo "OK: Couverture suffisante"
+        else
+          echo "ATTENTION: Pas de rapport de couverture généré"
+        fi
+    env:
+      NODE_ENV: test
+
+  sonarqube-scan:
+    desc: "Analyse de qualité avec SonarQube"
+    preconditions:
+      - sh: command -v sonar-scanner
+        msg: "sonar-scanner n'est pas installé. Lancez 'task setup' ou: npm i -g sonar-scanner"
+    cmds:
+      - sonar-scanner -Dsonar.host.url={{.SONAR_URL}} -Dsonar.projectKey={{.SONAR_PROJECT_KEY}} {{if ne .SONAR_TOKEN ""}} -Dsonar.token={{.SONAR_TOKEN}}{{end}}
+
+  docker-build:
+    desc: "Build de l'image Docker"
+    preconditions:
+      - sh: command -v docker
+        msg: "Docker n'est pas installé."
+    cmds:
+      - docker build -t {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}} -f {{.DOCKERFILE}} .
+      - echo "Image construite - {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}"
+
+  trivy-image:
+    desc: "Scan de vulnérabilités de l'image Docker avec Trivy"
+    preconditions:
+      - sh: command -v trivy
+        msg: "Trivy n'est pas installé. Lancez 'task setup' ou: https://aquasecurity.github.io/trivy"
+    cmds:
+      - mkdir -p {{.REPORTS_DIR}}
+      - trivy image --severity {{.TRIVY_SEVERITY}} --format {{if eq .CI "true"}}json --output {{.REPORTS_DIR}}/trivy-image-report.json{{else}}table{{end}} {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}
+
+  snyk-test:
+    desc: "Analyse approfondie des dépendances avec Snyk"
+    preconditions:
+      - sh: command -v snyk
+        msg: "Snyk n'est pas installé. Lancez 'task setup' ou: npm i -g snyk && snyk auth"
+    cmds:
+      - snyk test {{if eq .CI "true"}}--json > {{.REPORTS_DIR}}/snyk-report.json || true{{else}}--severity-threshold=medium{{end}}

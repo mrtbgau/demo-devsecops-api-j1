@@ -211,3 +211,131 @@ tasks:
         msg: "Snyk n'est pas installé. Lancez 'task setup' ou: npm i -g snyk && snyk auth"
     cmds:
       - snyk test {{if eq .CI "true"}}--json > {{.REPORTS_DIR}}/snyk-report.json || true{{else}}--severity-threshold=medium{{end}}
+
+# =============================================================================
+# PHASE 4 : STAGING
+# Déploiement et validation en pré-production (~10-20min)
+# =============================================================================
+
+  staging:
+    desc: "[Phase 4] Déploiement et validation en staging"
+    cmds:
+      - task: docker-build-staging
+      - task: docker-push-staging
+      - task: deploy-staging
+      - task: smoke-test
+      - task: dast
+      - task: performance-test
+
+  docker-build-staging:
+    desc: "Build de l'image Docker pour staging"
+    cmds:
+      - docker build -t {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:staging -f {{.DOCKERFILE}} --build-arg NODE_ENV=staging .
+
+  docker-push-staging:
+    desc: "Push de l'image vers le registry (staging)"
+    cmds:
+      - docker push {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:staging
+
+  deploy-staging:
+    desc: "Déploiement en environnement staging"
+    cmds:
+      - |
+        echo "=== Déploiement en staging ==="
+        if [ -f {{.STAGING_COMPOSE}} ]; then
+          docker compose -f {{.STAGING_COMPOSE}} pull
+          docker compose -f {{.STAGING_COMPOSE}} up -d --force-recreate
+          echo "Attente du démarrage des services..."
+          sleep 10
+        else
+          echo "ATTENTION: {{.STAGING_COMPOSE}} non trouvé."
+          echo "Déploiement manuel requis ou créez le fichier docker-compose.staging.yml"
+          exit 1
+        fi
+
+  smoke-test:
+    desc: "Tests de fumée sur les endpoints critiques"
+    cmds:
+      - |
+        echo "=== Smoke Tests - {{.STAGING_URL}} ==="
+        FAILED=0
+
+        # Health check
+        echo -n "Health check... "
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" {{.STAGING_URL}}/api/health 2>/dev/null)
+        if [ "$STATUS" = "200" ]; then
+          echo "OK ($STATUS)"
+        else
+          echo "ÉCHEC ($STATUS)"
+          FAILED=1
+        fi
+
+        # Page d'accueil
+        echo -n "Page d'accueil... "
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" {{.STAGING_URL}}/ 2>/dev/null)
+        if [ "$STATUS" = "200" ]; then
+          echo "OK ($STATUS)"
+        else
+          echo "ÉCHEC ($STATUS)"
+          FAILED=1
+        fi
+
+        # Login endpoint (doit répondre, même erreur 4xx)
+        echo -n "Login endpoint... "
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST {{.STAGING_URL}}/api/auth/login -H "Content-Type: application/json" -d '{"username":"test","password":"test"}' 2>/dev/null)
+        if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 500 ]; then
+          echo "OK ($STATUS)"
+        else
+          echo "ÉCHEC ($STATUS)"
+          FAILED=1
+        fi
+
+        if [ "$FAILED" -eq 1 ]; then
+          echo "=== SMOKE TESTS ÉCHOUÉS ==="
+          exit 1
+        fi
+        echo "=== Tous les smoke tests OK ==="
+
+  dast:
+    desc: "Scan DAST avec OWASP ZAP (API scan)"
+    preconditions:
+      - sh: command -v docker
+        msg: "Docker est requis pour exécuter OWASP ZAP"
+    cmds:
+      - mkdir -p {{.REPORTS_DIR}}
+      - |
+        echo "=== OWASP ZAP - API Scan contre {{.STAGING_URL}} ==="
+        docker run --rm --network=host \
+          -v $(pwd)/{{.REPORTS_DIR}}:/zap/wrk:rw \
+          ghcr.io/zaproxy/zaproxy:stable \
+          zap-api-scan.py \
+            -t {{.STAGING_URL}}/ \
+            -f openapi \
+            -r zap-report.html \
+            -J zap-report.json \
+            -l WARN \
+          || echo "ZAP scan terminé (vérifiez le rapport dans {{.REPORTS_DIR}}/)"
+
+  performance-test:
+    desc: "Tests de charge avec k6"
+    preconditions:
+      - sh: command -v k6
+        msg: "k6 n'est pas installé. Lancez 'task setup' ou: https://k6.io/docs/getting-started/installation/"
+    cmds:
+      - |
+        echo "=== Tests de performance - {{.STAGING_URL}} ==="
+        if [ -f tests/performance/load-test.js ]; then
+          k6 run tests/performance/load-test.js --env BASE_URL={{.STAGING_URL}} {{if eq .CI "true"}}--out json={{.REPORTS_DIR}}/k6-report.json{{end}}
+        else
+          echo "ATTENTION: Fichier de test k6 non trouvé (tests/performance/load-test.js)"
+          echo "Exécution d'un test de charge basique..."
+          k6 run --vus 10 --duration 30s - <<'SCRIPT'
+        import http from 'k6/http';
+        import { check, sleep } from 'k6';
+        export default function () {
+          const res = http.get('{{.STAGING_URL}}/api/health');
+          check(res, { 'status 200': (r) => r.status === 200 });
+          sleep(1);
+        }
+        SCRIPT
+        fi

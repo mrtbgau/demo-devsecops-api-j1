@@ -1,0 +1,12 @@
+version: '3'
+
+vars:
+  GREETING: '{{.GREETING | default "Hello World!"}}'
+
+dotenv: ['.env']
+
+tasks:
+  hello:
+    desc: Test de base avec variable d'environnement
+    cmds:
+      - echo "{{.GREETING}}"

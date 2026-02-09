@@ -1,0 +1,27 @@
+{
+  "name": "devsecops-filrouge",
+  "version": "1.0.0",
+  "description": "API volontairement vulnérable pour l'apprentissage DevSecOps",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "init-db": "node scripts/init-db.js"
+  },
+  "keywords": [
+    "devsecops",
+    "security",
+    "owasp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "4.17.1",
+    "pg": "8.7.1",
+    "dotenv": "10.0.0",
+    "cors": "2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "2.0.15"
+  }
+}

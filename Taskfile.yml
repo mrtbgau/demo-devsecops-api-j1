@@ -1,12 +1,94 @@
-version: '3'
+# =============================================================================
+# Pipeline DevSecOps - Taskfile.yml
+# =============================================================================
+# Phases du cycle de vie:
+#   1. pre-commit      - Vérifications rapides avant chaque commit
+#   2. branch-feature   - Vérifications approfondies sur branche feature
+#   3. pull-request     - Validation complète avant merge (CI/CD)
+#   4. staging          - Déploiement et validation en pré-production
+#   5. production       - Déploiement sécurisé en production
+#   6. nightly          - Analyses approfondies planifiées
+#
+# Usage:
+#   task <phase>          - Exécuter une phase complète
+#   task <sous-tâche>     - Exécuter une tâche individuelle
+#   task --list           - Lister toutes les tâches disponibles
+#   task setup            - Installer tous les outils nécessaires
+# =============================================================================
 
-vars:
-  GREETING: '{{.GREETING | default "Hello World!"}}'
+version: '3'
 
 dotenv: ['.env']
 
+vars:
+  # --- Environnement ---
+  CI: '{{.CI | default "false"}}'
+  NODE_ENV: '{{.NODE_ENV | default "development"}}'
+
+  # --- Docker ---
+  DOCKER_REGISTRY: '{{.DOCKER_REGISTRY | default "localhost:5000"}}'
+  IMAGE_NAME: '{{.IMAGE_NAME | default "devsecops-api"}}'
+  IMAGE_TAG: '{{.IMAGE_TAG | default "latest"}}'
+  DOCKERFILE: '{{.DOCKERFILE | default "Dockerfile"}}'
+
+  # --- SonarQube ---
+  SONAR_URL: '{{.SONAR_URL | default "http://localhost:9000"}}'
+  SONAR_PROJECT_KEY: '{{.SONAR_PROJECT_KEY | default "demo-devsecops-api-j1"}}'
+
+  # --- Staging / Production ---
+  STAGING_URL: '{{.STAGING_URL | default "http://localhost:3001"}}'
+  PROD_URL: '{{.PROD_URL | default "http://localhost:3000"}}'
+  STAGING_COMPOSE: '{{.STAGING_COMPOSE | default "docker-compose.staging.yml"}}'
+  PROD_COMPOSE: '{{.PROD_COMPOSE | default "docker-compose.prod.yml"}}'
+
+  # --- Seuils ---
+  COVERAGE_THRESHOLD: '{{.COVERAGE_THRESHOLD | default "60"}}'
+  TRIVY_SEVERITY: '{{.TRIVY_SEVERITY | default "HIGH,CRITICAL"}}'
+
+  # --- Rapports ---
+  REPORTS_DIR: '{{.REPORTS_DIR | default "reports"}}'
+
+# =============================================================================
+# PHASE 1 : PRE-COMMIT
+# Vérifications rapides avant chaque commit (~30s)
+# =============================================================================
+
 tasks:
-  hello:
-    desc: Test de base avec variable d'environnement
+
+  pre-commit:
+    desc: "[Phase 1] Vérifications pré-commit (lint, format, secrets, tests unitaires)"
     cmds:
-      - echo "{{.GREETING}}"
+      - task: lint
+      - task: format-check
+      - task: secrets-scan
+      - task: unit-test
+
+  lint:
+    desc: "Analyse statique du code avec ESLint"
+    cmds:
+      - npx eslint src/ --ext .js --format {{if eq .CI "true"}}json{{else}}stylish{{end}} {{if eq .CI "true"}}--output-file {{.REPORTS_DIR}}/eslint-report.json{{end}}
+    sources:
+      - src/**/*.js
+
+  format-check:
+    desc: "Vérification du formatage avec Prettier"
+    cmds:
+      - npx prettier --check "src/**/*.js"
+
+  secrets-scan:
+    desc: "Détection de secrets avec gitleaks"
+    preconditions:
+      - sh: command -v gitleaks
+        msg: "gitleaks n'est pas installé. Lancez 'task setup' ou installez-le : https://github.com/gitleaks/gitleaks"
+    cmds:
+      - mkdir -p {{.REPORTS_DIR}}
+      - gitleaks detect --source . --verbose --redact --report-format json --report-path {{.REPORTS_DIR}}/gitleaks-report.json
+    ignore_error: true
+
+  unit-test:
+    desc: "Tests unitaires rapides (fail-fast)"
+    cmds:
+      - npx jest --bail --forceExit --detectOpenHandles {{if eq .CI "true"}}--ci --reporters=default --reporters=jest-junit{{end}}
+    env:
+      NODE_ENV: test
+      JEST_JUNIT_OUTPUT_DIR: "{{.REPORTS_DIR}}"

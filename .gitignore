@@ -34,6 +34,10 @@ credentials.json
 dist/
 build/
 
+# DevSecOps reports & coverage
+reports/
+coverage/
+
 # Database
 *.sqlite
 *.db

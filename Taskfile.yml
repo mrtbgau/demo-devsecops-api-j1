@@ -427,3 +427,185 @@ tasks:
         echo "Création du tag: v${VERSION}"
         git tag -a "v${VERSION}" -m "Release v${VERSION} - $(date -Iseconds)"
         echo "Tag créé. Pour pousser: git push origin v${VERSION}"
+
+# =============================================================================
+# PHASE 6 : NIGHTLY
+# Analyses approfondies planifiées (cron / scheduled pipeline)
+# =============================================================================
+
+  nightly:
+    desc: "[Phase 6] Analyses approfondies nocturnes (SAST, DAST, SBOM, rapport)"
+    cmds:
+      - task: full-sast
+      - task: full-dast
+      - task: trivy-fs
+      - task: trivy-image-full
+      - task: sbom
+      - task: dependency-review
+      - task: sonarqube-full
+      - task: security-report
+
+  full-sast:
+    desc: "SAST complet avec Semgrep (toutes règles)"
+    preconditions:
+      - sh: command -v semgrep
+        msg: "Semgrep n'est pas installé. Lancez 'task setup' ou: pip install semgrep"
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    cmds:
+      - mkdir -p {{.REPORTS_DIR}}/nightly
+      - semgrep scan --config=auto --config=p/owasp-top-ten --config=p/nodejs --config=p/javascript --config=p/security-audit --config=p/secrets --json --output={{.REPORTS_DIR}}/nightly/semgrep-full-report.json src/
+      - echo "Rapport SAST complet généré dans {{.REPORTS_DIR}}/nightly/semgrep-full-report.json"
+
+  full-dast:
+    desc: "DAST complet avec OWASP ZAP (full scan)"
+    preconditions:
+      - sh: command -v docker
+        msg: "Docker est requis pour exécuter OWASP ZAP"
+    cmds:
+      - mkdir -p {{.REPORTS_DIR}}/nightly
+      - |
+        echo "=== OWASP ZAP - Full Scan contre {{.STAGING_URL}} ==="
+        docker run --rm --network=host \
+          -v $(pwd)/{{.REPORTS_DIR}}/nightly:/zap/wrk:rw \
+          ghcr.io/zaproxy/zaproxy:stable \
+          zap-full-scan.py \
+            -t {{.STAGING_URL}}/ \
+            -r zap-full-report.html \
+            -J zap-full-report.json \
+          || echo "ZAP full scan terminé (vérifiez les rapports)"
+
+  trivy-fs:
+    desc: "Scan Trivy du filesystem (code source + dépendances)"
+    preconditions:
+      - sh: command -v trivy
+        msg: "Trivy n'est pas installé. Lancez 'task setup'"
+    cmds:
+      - mkdir -p {{.REPORTS_DIR}}/nightly
+      - trivy fs --severity {{.TRIVY_SEVERITY}} --format json --output {{.REPORTS_DIR}}/nightly/trivy-fs-report.json .
+      - trivy fs --severity {{.TRIVY_SEVERITY}} --format table .
+
+  trivy-image-full:
+    desc: "Scan Trivy complet de l'image Docker"
+    preconditions:
+      - sh: command -v trivy
+        msg: "Trivy n'est pas installé. Lancez 'task setup'"
+    cmds:
+      - mkdir -p {{.REPORTS_DIR}}/nightly
+      - trivy image --severity {{.TRIVY_SEVERITY}} --format json --output {{.REPORTS_DIR}}/nightly/trivy-image-report.json {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}
+      - trivy image --severity {{.TRIVY_SEVERITY}} --format table {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}
+
+  sbom:
+    desc: "Génération du Software Bill of Materials (SBOM) avec Syft"
+    preconditions:
+      - sh: command -v syft
+        msg: "Syft n'est pas installé. Lancez 'task setup' ou: https://github.com/anchore/syft"
+    cmds:
+      - mkdir -p {{.REPORTS_DIR}}/nightly
+      - syft {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}} -o spdx-json={{.REPORTS_DIR}}/nightly/sbom-spdx.json
+      - syft {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}} -o cyclonedx-json={{.REPORTS_DIR}}/nightly/sbom-cyclonedx.json
+      - echo "SBOM générés (SPDX + CycloneDX) dans {{.REPORTS_DIR}}/nightly/"
+
+  dependency-review:
+    desc: "Revue complète des dépendances (npm audit + Snyk)"
+    cmds:
+      - mkdir -p {{.REPORTS_DIR}}/nightly
+      - echo "=== npm audit ==="
+      - npm audit --json > {{.REPORTS_DIR}}/nightly/npm-audit-full.json || true
+      - npm audit || true
+      - echo ""
+      - echo "=== Dépendances obsolètes ==="
+      - npm outdated --json > {{.REPORTS_DIR}}/nightly/npm-outdated.json || true
+      - npm outdated || true
+      - |
+        if command -v snyk &> /dev/null; then
+          echo ""
+          echo "=== Snyk Deep Analysis ==="
+          snyk test --json > {{.REPORTS_DIR}}/nightly/snyk-full-report.json || true
+          snyk test || true
+        else
+          echo "Snyk non installé, saut de l'analyse Snyk"
+        fi
+
+  sonarqube-full:
+    desc: "Analyse SonarQube complète"
+    preconditions:
+      - sh: command -v sonar-scanner
+        msg: "sonar-scanner n'est pas installé. Lancez 'task setup' ou: npm i -g sonar-scanner"
+    cmds:
+      - sonar-scanner -Dsonar.host.url={{.SONAR_URL}} -Dsonar.projectKey={{.SONAR_PROJECT_KEY}} {{if ne .SONAR_TOKEN ""}} -Dsonar.token={{.SONAR_TOKEN}}{{end}} -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+
+  security-report:
+    desc: "Génération du rapport de sécurité consolidé"
+    cmds:
+      - mkdir -p {{.REPORTS_DIR}}/nightly
+      - |
+        echo "=== Rapport de sécurité consolidé ==="
+        echo "Date: $(date -Iseconds)"
+        echo ""
+
+        REPORT={{.REPORTS_DIR}}/nightly/security-summary.md
+        cat > $REPORT << 'HEADER'
+        # Rapport de Sécurité DevSecOps
+        HEADER
+
+        echo "**Date:** $(date -Iseconds)" >> $REPORT
+        echo "**Projet:** {{.SONAR_PROJECT_KEY}}" >> $REPORT
+        echo "**Image:** {{.DOCKER_REGISTRY}}/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}" >> $REPORT
+        echo "" >> $REPORT
+        echo "## Résumé des analyses" >> $REPORT
+        echo "" >> $REPORT
+
+        # SAST
+        echo "### SAST (Semgrep)" >> $REPORT
+        if [ -f {{.REPORTS_DIR}}/nightly/semgrep-full-report.json ]; then
+          FINDINGS=$(node -e "const r=require('./{{.REPORTS_DIR}}/nightly/semgrep-full-report.json');console.log(r.results?r.results.length:'N/A')" 2>/dev/null || echo "N/A")
+          echo "- Findings: ${FINDINGS}" >> $REPORT
+        else
+          echo "- Rapport non disponible" >> $REPORT
+        fi
+        echo "" >> $REPORT
+
+        # npm audit
+        echo "### SCA (npm audit)" >> $REPORT
+        if [ -f {{.REPORTS_DIR}}/nightly/npm-audit-full.json ]; then
+          VULNS=$(node -e "const r=require('./{{.REPORTS_DIR}}/nightly/npm-audit-full.json');const m=r.metadata||{};console.log('Critical:',m.vulnerabilities?.critical||0,', High:',m.vulnerabilities?.high||0,', Moderate:',m.vulnerabilities?.moderate||0)" 2>/dev/null || echo "N/A")
+          echo "- ${VULNS}" >> $REPORT
+        else
+          echo "- Rapport non disponible" >> $REPORT
+        fi
+        echo "" >> $REPORT
+
+        # Trivy
+        echo "### Container Scan (Trivy)" >> $REPORT
+        if [ -f {{.REPORTS_DIR}}/nightly/trivy-image-report.json ]; then
+          echo "- Rapport disponible: {{.REPORTS_DIR}}/nightly/trivy-image-report.json" >> $REPORT
+        else
+          echo "- Rapport non disponible" >> $REPORT
+        fi
+        echo "" >> $REPORT
+
+        # DAST
+        echo "### DAST (OWASP ZAP)" >> $REPORT
+        if [ -f {{.REPORTS_DIR}}/nightly/zap-full-report.json ]; then
+          echo "- Rapport disponible: {{.REPORTS_DIR}}/nightly/zap-full-report.json" >> $REPORT
+        else
+          echo "- Rapport non disponible" >> $REPORT
+        fi
+        echo "" >> $REPORT
+
+        # SBOM
+        echo "### SBOM" >> $REPORT
+        if [ -f {{.REPORTS_DIR}}/nightly/sbom-spdx.json ]; then
+          echo "- SPDX: {{.REPORTS_DIR}}/nightly/sbom-spdx.json" >> $REPORT
+          echo "- CycloneDX: {{.REPORTS_DIR}}/nightly/sbom-cyclonedx.json" >> $REPORT
+        else
+          echo "- Non généré" >> $REPORT
+        fi
+        echo "" >> $REPORT
+        echo "---" >> $REPORT
+        echo "*Généré automatiquement par la pipeline DevSecOps*" >> $REPORT
+
+        echo "Rapport généré: $REPORT"
+        cat $REPORT

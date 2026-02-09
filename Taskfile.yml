@@ -92,3 +92,45 @@ tasks:
     env:
       NODE_ENV: test
       JEST_JUNIT_OUTPUT_DIR: "{{.REPORTS_DIR}}"
+
+# =============================================================================
+# PHASE 2 : FEATURE BRANCH
+# Vérifications approfondies pendant le développement (~2-5min)
+# =============================================================================
+
+  branch-feature:
+    desc: "[Phase 2] Vérifications sur branche feature (pre-commit + SAST + SCA)"
+    cmds:
+      - task: pre-commit
+      - task: sast
+      - task: npm-audit
+      - task: license-check
+      - task: outdated
+
+  sast:
+    desc: "Analyse SAST avec Semgrep (règles OWASP)"
+    preconditions:
+      - sh: command -v semgrep
+        msg: "Semgrep n'est pas installé. Lancez 'task setup' ou: pip install semgrep"
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    cmds:
+      - mkdir -p {{.REPORTS_DIR}}
+      - semgrep scan --config=auto --config=p/owasp-top-ten --config=p/nodejs --config=p/javascript {{if eq .CI "true"}}--json --output={{.REPORTS_DIR}}/semgrep-report.json{{else}}--verbose{{end}} src/
+    ignore_error: true
+
+  npm-audit:
+    desc: "Scan des vulnérabilités dans les dépendances (npm audit)"
+    cmds:
+      - npm audit {{if eq .CI "true"}}--json > {{.REPORTS_DIR}}/npm-audit-report.json || true{{else}}--audit-level=moderate{{end}}
+
+  license-check:
+    desc: "Vérification de conformité des licences"
+    cmds:
+      - npx license-checker --summary --failOn "GPL-3.0;AGPL-3.0;UNLICENSED" {{if eq .CI "true"}}--json > {{.REPORTS_DIR}}/license-report.json{{end}}
+
+  outdated:
+    desc: "Détection des dépendances obsolètes"
+    cmds:
+      - npm outdated || true

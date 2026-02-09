@@ -1,26 +1,46 @@
 const express = require('express');
-const router = express.Router();
-const pool = require('../config/database');
+const bcrypt = require('bcryptjs');
+const { body, validationResult } = require('express-validator');
 
-// 🚨 ATTENTION : Ce fichier est le "CHALLENGE" du cours
-// 🚨 Objectif : trouver TOUTES les vulnérabilités !
+// Factory function : accepte le pool en parametre pour l'injection de dependance
+function createUsersRouter(pool) {
+  const router = express.Router();
 
-router.post('/users', async (req, res) => {
-  try {
-    const { email, password, role } = req.body;
+  router.post('/users', [
+    // SECURE : Validation des inputs avec express-validator
+    body('email').isEmail().withMessage('Valid email is required'),
+    body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+  ], async (req, res) => {
+    try {
+      // SECURE : Verifier les erreurs de validation
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
 
-    const query = `INSERT INTO users (username, email, password, role)
-                   VALUES ('${email}', '${email}', '${password}', '${role}')`;
+      const { email, password } = req.body;
 
-    await pool.query(query);
+      // SECURE : Le role est TOUJOURS force a 'user' cote serveur
+      // Avant (VULNERABLE) : const { role } = req.body; -- permettait l'escalade de privileges
+      const role = 'user';
 
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({
-      error: err.message,
-      stack: err.stack
-    });
-  }
-});
+      // SECURE : Hachage bcrypt du mot de passe avant stockage
+      const hashedPassword = await bcrypt.hash(password, 10);
 
-module.exports = router;
+      // SECURE : Requete parametree au lieu de string interpolation
+      // Avant (VULNERABLE) : `INSERT INTO users ... VALUES ('${email}', '${email}', '${password}', '${role}')`
+      const query = 'INSERT INTO users (username, email, password, role) VALUES ($1, $2, $3, $4)';
+      await pool.query(query, [email, email, hashedPassword, role]);
+
+      res.status(201).json({ success: true });
+    } catch (err) {
+      // SECURE : Pas de stack trace dans la reponse d'erreur
+      // Avant (VULNERABLE) : res.status(500).json({ error: err.message, stack: err.stack })
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  return router;
+}
+
+module.exports = createUsersRouter;

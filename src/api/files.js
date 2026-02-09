@@ -1,22 +1,39 @@
 const express = require('express');
-const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 
-// 🚨 ATTENTION : Ce fichier contient des vulnérabilités à des fins pédagogiques
+// Factory function : accepte le dossier uploads en parametre
+function createFilesRouter(uploadsDir) {
+  const router = express.Router();
 
-router.get('/files', (req, res) => {
-  const filename = req.query.name;
-  // Utilisation de concaténation simple (vulnérable) au lieu de path.join() qui normalise
-  const uploadsDir = path.join(__dirname, '../../uploads');
-  const filepath = `${uploadsDir}/${filename}`;
+  // Resoudre le chemin canonique une seule fois
+  const resolvedUploadsDir = path.resolve(uploadsDir);
 
-  try {
-    const content = fs.readFileSync(filepath);
-    res.send(content);
-  } catch (err) {
-    res.status(404).json({ error: 'File not found' });
-  }
-});
+  router.get('/files', (req, res) => {
+    const filename = req.query.name;
 
-module.exports = router;
+    // SECURE : Validation que le parametre name est present
+    if (!filename) {
+      return res.status(400).json({ error: 'Filename is required' });
+    }
+
+    // SECURE : Resoudre le chemin complet et verifier qu'il reste dans uploadsDir
+    // Avant (VULNERABLE) : const filepath = `${uploadsDir}/${filename}`;
+    const filepath = path.resolve(resolvedUploadsDir, filename);
+
+    if (!filepath.startsWith(resolvedUploadsDir + path.sep) && filepath !== resolvedUploadsDir) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    try {
+      const content = fs.readFileSync(filepath);
+      res.send(content);
+    } catch (err) {
+      res.status(404).json({ error: 'File not found' });
+    }
+  });
+
+  return router;
+}
+
+module.exports = createFilesRouter;

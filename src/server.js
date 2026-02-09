@@ -6,6 +6,9 @@ const fs = require('fs');
 const path = require('path');
 const authenticate = require('./middlewares/authenticate');
 const authorize = require('./middlewares/authorize');
+const logger = require('./observability/logger');
+const requestLogger = require('./observability/requestLogger');
+const { register } = require('./observability/metrics');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,6 +21,9 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
 // SECURE : Limiter la taille du body pour eviter les attaques DoS par payload
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// OBSERVABILITE : Logger chaque requete HTTP (methode, path, status, duree, ip)
+app.use(requestLogger);
 
 // SECURE : Rate limiting global pour prevenir les attaques DoS
 const globalLimiter = rateLimit({
@@ -100,6 +106,12 @@ app.get('/', (req, res) => {
         path: '/api/health',
         description: 'Health check',
         example: '/api/health'
+      },
+      {
+        method: 'GET',
+        path: '/metrics',
+        description: 'Metriques Prometheus (observabilite)',
+        example: '/metrics'
       }
     ]
   });
@@ -108,6 +120,16 @@ app.get('/', (req, res) => {
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// OBSERVABILITE : Endpoint Prometheus pour le scraping des metriques
+app.get('/metrics', async (req, res) => {
+  try {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+  } catch (err) {
+    res.status(500).end(err.message);
+  }
 });
 
 // Monter les routes
@@ -124,7 +146,13 @@ app.use((req, res) => {
 
 // Error handler global
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  // OBSERVABILITE : Logger les erreurs non gerees avec contexte
+  logger.error('Erreur non geree', {
+    error: err.message,
+    stack: err.stack,
+    method: req.method,
+    path: req.originalUrl
+  });
   // SECURE : Ne jamais exposer le stack trace en production
   res.status(500).json({
     error: 'Internal server error'
@@ -134,7 +162,10 @@ app.use((err, req, res, next) => {
 // SECURE : Guard pour eviter de demarrer le serveur lors des tests
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`Server started on http://localhost:${PORT}`);
+    logger.info(`Server started on http://localhost:${PORT}`, {
+      event: 'server_start',
+      port: PORT
+    });
   });
 }
 

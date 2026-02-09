@@ -4,10 +4,11 @@ services:
   postgres-sonar:
     image: postgres:15-alpine
     container_name: devsecops-sonarqube-db
+    # SECURE : Les secrets sont lus depuis le fichier .env
     environment:
       POSTGRES_DB: sonarqube
-      POSTGRES_USER: sonar
-      POSTGRES_PASSWORD: SonarAdmin123!
+      POSTGRES_USER: ${SONAR_DB_USER:-sonar}
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:?SONAR_DB_PASSWORD must be set in .env}
     ports:
       - "5435:5432"
     volumes:
@@ -15,7 +16,7 @@ services:
     networks:
       - sonarqube-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sonar -d sonarqube"]
+      test: ["CMD-SHELL", "pg_isready -U $${SONAR_DB_USER:-sonar} -d sonarqube"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -26,10 +27,11 @@ services:
     depends_on:
       postgres-sonar:
         condition: service_healthy
+    # SECURE : Les secrets sont lus depuis le fichier .env
     environment:
       SONAR_JDBC_URL: jdbc:postgresql://postgres-sonar:5432/sonarqube
-      SONAR_JDBC_USERNAME: sonar
-      SONAR_JDBC_PASSWORD: SonarAdmin123!
+      SONAR_JDBC_USERNAME: ${SONAR_DB_USER:-sonar}
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?SONAR_DB_PASSWORD must be set in .env}
     ports:
       - "9000:9000"
     volumes:

@@ -4,17 +4,18 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: devsecops-db
+    # SECURE : Les secrets sont lus depuis le fichier .env, plus de mot de passe en dur
     environment:
-      POSTGRES_DB: myapp
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: Admin123!
+      POSTGRES_DB: ${POSTGRES_DB:-myapp}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U root -d myapp"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-myapp}"]
       interval: 5s
       timeout: 5s
       retries: 5
